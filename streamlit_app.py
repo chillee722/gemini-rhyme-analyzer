@@ -44,6 +44,8 @@ PHONEME_EMBEDDINGS = {
     'r': np.array([0.1, 0.0, 0.8, 0.5, 0.5]),
     'ʊ': np.array([0.3, 0.6, 0.4, 0.0, 0.0]),  # as in 'good'
     'k': np.array([0.0, 0.5, 0.0, 0.5, 0.0]),  # Consonant 'k'
+    'v': np.array([0.0, 0.8, 0.0, 1.0, 0.2]),  # Consonant 'v'
+    'l': np.array([0.0, 0.0, 0.7, 0.4, 0.0]),  # Consonant 'l'
 }
 
 # =========================================================
@@ -57,18 +59,31 @@ def get_arpabet_and_rhyme_unit(word):
     if word not in p_dict:
         return None, None 
 
+    # CMUDict는 다중 발음을 가질 수 있지만, 첫 번째 발음만 사용합니다.
     pron = p_dict[word][0] 
     
     rhyme_start_index = -1
+    
+    # 1. 주 강세(1)를 먼저 찾습니다.
     for i, phon in enumerate(pron):
-        if phon[-1] in ('1', '2'): 
+        if phon.endswith('1'): 
             rhyme_start_index = i
             break
             
+    # 2. 주 강세가 없으면 부 강세(2)를 찾습니다.
+    if rhyme_start_index == -1:
+        for i, phon in enumerate(pron):
+            if phon.endswith('2'):
+                rhyme_start_index = i
+                break
+            
+    # 3. 강세 모음이 전혀 없는 단어(함께, to, a 등)는 실패 처리합니다.
     if rhyme_start_index == -1:
         return None, None 
 
+    # ARPAbet 발음에서 스트레스 마크 제거
     clean_arpabet = [phon.rstrip('0123') for phon in pron]
+    # 라임 유닛 추출 (강세 모음부터 끝까지)
     rhyme_unit = clean_arpabet[rhyme_start_index:]
     
     return clean_arpabet, rhyme_unit
@@ -77,6 +92,7 @@ def arpabet_to_ipa(arpabet_phons):
     """ARPAbet 음소열을 eng-to-ipa를 사용하여 IPA 문자열로 변환합니다."""
     arpabet_str = ', '.join(arpabet_phons)
     try:
+        # eng-to-ipa 라이브러리의 모드에 주의하여 IPA 문자열을 반환합니다.
         ipa_str = ipa.convert(arpabet_str, mode='arpabet').strip().replace(' ', '').replace('ˈ', '').replace('ˌ', '')
         return ipa_str
     except Exception:
@@ -84,6 +100,8 @@ def arpabet_to_ipa(arpabet_phons):
 
 def calculate_rhyme_score(ipa1, ipa2):
     """두 IPA 문자열의 벡터 유사도 점수 (코사인 유사도)를 계산합니다."""
+    # (로직 개선: 마지막 3개 음소 로직 유지)
+    
     phons1 = list(ipa1)[-3:]
     phons2 = list(ipa2)[-3:]
     
@@ -123,6 +141,8 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
         if word == target_word.lower() or len(word) <= 2 or len(pron_clean) < len(target_rhyme_unit): 
             continue
             
+        # 끝 부분이 라임 유닛과 일치하는지 확인 (Near Rhyme 후보군 필터링)
+        # CMUDict 라임 로직은 발음의 끝 부분이 일치하는 단어를 찾습니다.
         if pron_clean[-len(target_rhyme_unit):] == target_rhyme_unit:
             
             candidate_ipa = arpabet_to_ipa(pron_clean)
