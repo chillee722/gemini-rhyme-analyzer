@@ -20,43 +20,37 @@ def load_cmudict():
 p_dict = load_cmudict()
 
 # =========================================================
-# 1. 음소 임베딩 최종 조정 (T/M 유사도 강화)
+# 1. 음소 임베딩 최종 조정 (활음/유음 계열 유사성 강화)
 # =========================================================
 
 # ARPAbet 기호에 언어학적 특징 반영: [모음, 비음, 발성, 조음위치, 조음방법]
 PHONEME_EMBEDDINGS: Dict[str, np.ndarray] = {
-    # Vowels (모음):
+    # Vowels (모음): IY와 AE 등 주요 모음 중요도 유지
     'AE': np.array([1.0, 0.1, 1.0, 0.2, 0.0]),
     'IY': np.array([0.9, 0.1, 1.0, 0.0, 0.0]),
     'IH': np.array([0.8, 0.1, 1.0, 0.1, 0.0]),
     'AH': np.array([0.7, 0.2, 1.0, 0.5, 0.0]),
+    'AY': np.array([0.9, 0.1, 1.0, 0.3, 0.1]), # 'buy you' 계열 라임 강화
+    'AO': np.array([0.9, 0.1, 1.0, 0.7, 0.1]), # 'jaw you' 계열 라임 강화
     'ER': np.array([0.6, 0.0, 1.0, 0.5, 0.5]),
-    'AA': np.array([0.9, 0.1, 1.0, 0.8, 0.0]),
     
-    # Consonants (자음): 
-    # T (치경 파열음)
-    'T': np.array([0.0, 0.7, 0.0, 0.4, 0.9]), # 4번째 벡터(조음위치)를 M과 가깝게 조정
-    # M (양순 비음)
-    'M': np.array([0.0, 0.9, 1.0, 0.2, 0.8]), # 4번째 벡터(조음위치)를 T와 가깝게 조정
-    
-    # D/N (치경음 계열)
+    # Consonants: T/M 유사성 유지, L/R/Y/W (활음/유음) 유사성 강화
+    'T': np.array([0.0, 0.7, 0.0, 0.4, 0.9]), 
+    'M': np.array([0.0, 0.9, 1.0, 0.2, 0.8]), 
     'D': np.array([0.0, 0.8, 1.0, 0.3, 0.9]),
     'N': np.array([0.0, 0.9, 1.0, 0.3, 0.8]),
-    
-    # K/G (연구개 파열음)
     'K': np.array([0.0, 0.5, 0.0, 0.8, 0.9]),
     'G': np.array([0.0, 0.5, 1.0, 0.8, 0.9]),
-    
-    # F/V (순치 마찰음)
     'F': np.array([0.0, 0.5, 0.0, 0.1, 0.7]),
     'V': np.array([0.0, 0.5, 1.0, 0.1, 0.7]),
-    
-    # S/Z (치경 마찰음)
     'S': np.array([0.0, 0.0, 0.0, 0.3, 0.7]),
     'Z': np.array([0.0, 0.0, 1.0, 0.3, 0.7]),
     
-    'L': np.array([0.0, 0.0, 1.0, 0.7, 0.4]),
-    'R': np.array([0.1, 0.0, 1.0, 0.5, 0.5]),
+    # L/R/Y/W 계열: 모음과 유사한 특성(높은 1번째 벡터)과 활음 특성(낮은 5번째 벡터)을 부여하여 상호 유사성 강화
+    'L': np.array([0.4, 0.0, 1.0, 0.7, 0.3]),
+    'R': np.array([0.5, 0.0, 1.0, 0.5, 0.4]),
+    'Y': np.array([0.6, 0.0, 1.0, 0.1, 0.1]), # 모음과 유사하도록 1번째 벡터 높임
+    'W': np.array([0.6, 0.0, 1.0, 0.9, 0.1]), # 모음과 유사하도록 1번째 벡터 높임
 }
 
 def get_embedding(phon: str) -> np.ndarray:
@@ -76,7 +70,6 @@ def get_rhyme_unit(word: str) -> Optional[Tuple[List[str], List[str], List[str]]
         return None
         
     pron_raw = p_dict[word][0]
-    
     stress_markers = ['1', '2']
     stress_indices = [i for i, phon in enumerate(pron_raw) if phon[-1] in stress_markers]
     
@@ -173,11 +166,11 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
                 
                 slant_score = calculate_slant_score(target_rhyme_unit, candidate_rhyme_unit)
                 
-                # Slant Rhyme 기준 상향 조정: 0.93 이상이면 Near Perfect로 간주
-                if slant_score >= 0.93: 
+                # T/M, 활음 유사도 강화 반영: 기준을 0.95 이상으로 재조정하여 고품질 슬랜트 라임만 Near Perfect로 분류
+                if slant_score >= 0.95: 
                     score = slant_score
                     rhyme_type = "Multi-Syllable Slant Rhyme (Near Perfect)"
-                elif slant_score >= 0.80:
+                elif slant_score >= 0.85:
                     score = slant_score
                     rhyme_type = "Slant Rhyme (Good Match)"
                 else:
@@ -211,8 +204,8 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 
 st.set_page_config(page_title="Phonetics Analyzer (Eminem Style Rhyme)", layout="centered")
 
-st.title("🎤 CMUDict 통합: 에미넴 스타일 고급 라임 분석기 (T/M 유사도 강화)")
-st.caption("✅ **T**와 **M**의 벡터 유사도를 강화하여 'critical'과 'inimical' 같은 **멀티-음절 슬랜트 라임**에 높은 점수를 부여합니다.")
+st.title("🎤 CMUDict 통합: 에미넴 스타일 고급 라임 분석기 (최종)")
+st.caption("✅ **T/M 및 활음(L, R, Y, W) 유사도**를 강화하여 **멀티-음절 슬랜트 라임**에 높은 점수를 부여하는 최종 버전입니다.")
 
 # 사용자 입력
 input_word = st.text_input("분석할 단어를 입력하세요 (예: critical, together, machine)", "critical")
