@@ -68,24 +68,34 @@ def get_phonetic_tail(word):
     # 원본 pron, 클린 라임 유닛을 반환
     return pron_raw, rhyme_unit_clean
 
+# ---------------------------------------------------------
+# 🚨 핵심 수정 부분: ARPAbet을 IPA로 직접 매핑하는 안전 로직
+# ---------------------------------------------------------
+# eng-to-ipa 라이브러리의 의존성을 낮추고 변환 오류를 줄입니다.
+# CMUDict에서 가장 흔하게 발생하는 ARPAbet 기호에 대한 매핑입니다.
+ARPABET_TO_IPA_MAP = {
+    'AA': 'ɑ', 'AE': 'æ', 'AH': 'ʌ', 'AO': 'ɔ', 'AW': 'aʊ', 'AY': 'aɪ', 
+    'B': 'b', 'CH': 'ʧ', 'D': 'd', 'DH': 'ð', 'EH': 'ɛ', 'ER': 'əɹ', 
+    'EY': 'eɪ', 'F': 'f', 'G': 'g', 'HH': 'h', 'IH': 'ɪ', 'IY': 'i', 
+    'JH': 'ʤ', 'K': 'k', 'L': 'l', 'M': 'm', 'N': 'n', 'NG': 'ŋ', 
+    'OW': 'oʊ', 'OY': 'ɔɪ', 'P': 'p', 'R': 'r', 'S': 's', 'SH': 'ʃ', 
+    'T': 't', 'TH': 'θ', 'UH': 'ʊ', 'UW': 'u', 'V': 'v', 'W': 'w', 
+    'Y': 'j', 'Z': 'z', 'ZH': 'ʒ', 'T': 't', 'D': 'd'
+}
+
 def arpabet_to_ipa(arpabet_phons):
-    """ARPAbet 음소열을 eng-to-ipa를 사용하여 IPA 문자열로 변환합니다."""
-    # 음소열이 비어 있으면 None 반환
+    """ARPAbet 음소열을 직접 매핑하여 IPA 문자열로 변환합니다."""
     if not arpabet_phons:
         return None
-        
-    arpabet_str = ' '.join(arpabet_phons)
-    try:
-        # eng-to-ipa 라이브러리의 모드에 주의하여 IPA 문자열을 반환합니다.
-        # 공백과 강세 마크를 제거하여 깔끔한 음소열만 남깁니다.
-        ipa_str = ipa.convert(arpabet_str, mode='arpabet').strip().replace(' ', '').replace('ˈ', '').replace('ˌ', '')
-        
-        # IPA 변환 결과가 유효한지 확인 (빈 문자열이 아님)
-        if not ipa_str:
-            return None
-        return ipa_str
-    except Exception:
-        return None
+    
+    ipa_phons = [ARPABET_TO_IPA_MAP.get(phon.upper(), '') for phon in arpabet_phons]
+    
+    # 매핑되지 않은 음소(빈 문자열)는 제외하고 문자열로 합칩니다.
+    ipa_str = "".join([p for p in ipa_phons if p])
+    
+    return ipa_str if ipa_str else None
+# ---------------------------------------------------------
+
 
 def calculate_rhyme_score(ipa1, ipa2):
     """두 IPA 문자열의 벡터 유사도 점수 (코사인 유사도)를 계산합니다."""
@@ -128,7 +138,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     # 라임 유닛 IPA 변환 
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
-    # IPA 변환이 실패하면 여기서 바로 종료
+    # IPA 변환이 실패하면 여기서 바로 종료 (IPA가 None이 아님)
     if not target_ipa:
         return {"target_word": target_word, "target_ipa": "N/A", "raw_arpabet": target_pron_raw, "candidates": []}
 
