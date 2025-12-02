@@ -50,8 +50,8 @@ PHONEME_EMBEDDINGS = {
 
 def get_phonetic_tail(word):
     """
-    강세와 상관없이 CMUDict에서 단어의 끝 3개 음소(clean ARPAbet)를 추출합니다.
-    이것이 단순 라임 유닛이 됩니다.
+    강세와 상관없이 CMUDict에서 단어의 끝 음소(clean ARPAbet)를 추출합니다.
+    음소 길이가 3개 미만인 경우 모두 사용합니다.
     """
     word = word.lower()
     if word not in p_dict:
@@ -62,17 +62,27 @@ def get_phonetic_tail(word):
     # ARPAbet에서 스트레스 마크 제거 (0, 1, 2)
     pron_clean_full = [phon.rstrip('0123') for phon in pron_raw]
     
-    # 끝 3개 음소를 라임 유닛으로 사용
-    rhyme_unit_clean = pron_clean_full[-3:]
+    # 길이가 3개 미만이면 전체를 사용하고, 3개 이상이면 끝 3개 음소를 라임 유닛으로 사용
+    rhyme_unit_clean = pron_clean_full[-3:] if len(pron_clean_full) >= 3 else pron_clean_full
     
     # 원본 pron, 클린 라임 유닛을 반환
     return pron_raw, rhyme_unit_clean
 
 def arpabet_to_ipa(arpabet_phons):
     """ARPAbet 음소열을 eng-to-ipa를 사용하여 IPA 문자열로 변환합니다."""
+    # 음소열이 비어 있으면 None 반환
+    if not arpabet_phons:
+        return None
+        
     arpabet_str = ' '.join(arpabet_phons)
     try:
+        # eng-to-ipa 라이브러리의 모드에 주의하여 IPA 문자열을 반환합니다.
+        # 공백과 강세 마크를 제거하여 깔끔한 음소열만 남깁니다.
         ipa_str = ipa.convert(arpabet_str, mode='arpabet').strip().replace(' ', '').replace('ˈ', '').replace('ˌ', '')
+        
+        # IPA 변환 결과가 유효한지 확인 (빈 문자열이 아님)
+        if not ipa_str:
+            return None
         return ipa_str
     except Exception:
         return None
@@ -84,8 +94,13 @@ def calculate_rhyme_score(ipa1, ipa2):
     phons1 = list(ipa1)[-3:]
     phons2 = list(ipa2)[-3:]
     
+    # IPA가 3개 미만인 단어도 처리하기 위해 길이를 확인
     if not phons1 or not phons2 or len(phons1) != len(phons2):
-        return 0.0
+        # 짧은 단어끼리는 길이가 같아야 유사도를 측정합니다.
+        if len(phons1) < 3 and len(phons1) == len(phons2):
+             pass
+        else:
+             return 0.0
     
     vec1_list = [PHONEME_EMBEDDINGS.get(p, np.zeros(5)) for p in phons1]
     vec2_list = [PHONEME_EMBEDDINGS.get(p, np.zeros(5)) for p in phons2]
@@ -102,7 +117,7 @@ def calculate_rhyme_score(ipa1, ipa2):
 
 @st.cache_data(show_spinner=False)
 def get_rhyme_candidates_with_score(target_word: str, top_n=100):
-    """CMUDict 전체를 검색하여 끝 3개 음소가 일치하는 후보를 찾고 점수를 매깁니다."""
+    """CMUDict 전체를 검색하여 끝 음소가 일치하는 후보를 찾고 점수를 매깁니다."""
     
     # 강세가 없는 단순 종성 추출
     target_pron_raw, target_rhyme_unit = get_phonetic_tail(target_word)
@@ -113,6 +128,10 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     # 라임 유닛 IPA 변환 
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
+    # IPA 변환이 실패하면 여기서 바로 종료
+    if not target_ipa:
+        return {"target_word": target_word, "target_ipa": "N/A", "raw_arpabet": target_pron_raw, "candidates": []}
+
     candidates_list = []
     
     # ----------------------------------------------------------------
@@ -121,15 +140,15 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     for word, pron_list in p_dict.items():
         pron_raw = pron_list[0]
         
-        # 후보 단어의 끝 3개 음소 추출
+        # 후보 단어의 끝 음소 추출
         candidate_pron_clean_full = [p.rstrip('0123') for p in pron_raw]
-        candidate_rhyme_unit = candidate_pron_clean_full[-3:]
+        candidate_rhyme_unit = candidate_pron_clean_full[-len(target_rhyme_unit):]
         
-        # 1. 단어 필터링 (자기 자신, 너무 짧은 단어)
-        if word == target_word.lower() or len(word) <= 2:
+        # 1. 단어 필터링 (자기 자신, 너무 짧은 단어, 라임 유닛 길이 불일치)
+        if word == target_word.lower() or len(word) <= 2 or len(candidate_rhyme_unit) != len(target_rhyme_unit):
             continue
             
-        # 2. 끝 3개 음소 일치 확인 (가장 단순한 라임 조건)
+        # 2. 끝 음소 일치 확인 (가장 단순한 라임 조건)
         if candidate_rhyme_unit == target_rhyme_unit:
             
             # IPA 변환 (점수 계산용)
