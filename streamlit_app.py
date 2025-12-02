@@ -9,17 +9,14 @@ import sys
 import os
 
 # --- CMUDict 다운로드 및 로드 ---
-# Python 3.13 호환성을 위해 NLTK 예외 처리를 변경합니다.
-@st.cache_resource
+# Streamlit Cloud 환경에서 NLTK 데이터 다운로드가 필수적이므로, 예외 처리를 일반화합니다.
+@st.cache_resource(show_spinner="CMUDict 사전을 로드 중...")
 def load_cmudict():
     try:
         # CMUDict 데이터가 로컬에 있는지 확인합니다.
         nltk.data.find('corpora/cmudict')
-    except LookupError: # <--- NLTK 데이터가 없을 때 발생하는 일반적인 예외
-        # 데이터가 없으면 다운로드합니다. (Streamlit Cloud에서 자동 실행)
-        nltk.download('cmudict')
-    except AttributeError:
-        # 매우 오래된 버전에서 발생하는 예외를 대비합니다.
+    except LookupError: # NLTK 데이터가 없을 때 발생하는 일반적인 예외
+        # 데이터 다운로드 및 로드
         nltk.download('cmudict')
         
     return cmudict.dict()
@@ -57,20 +54,21 @@ def get_arpabet_and_rhyme_unit(word):
     """CMUDict에서 단어의 ARPAbet 발음과 라임 유닛을 추출합니다."""
     word = word.lower()
     if word not in p_dict:
-        return None, None 
+        # 단어가 CMUDict에 없는 경우
+        return None, None, None 
 
     # CMUDict는 다중 발음을 가질 수 있지만, 첫 번째 발음만 사용합니다.
     pron = p_dict[word][0] 
     
     rhyme_start_index = -1
     
-    # 1. 주 강세(1)를 먼저 찾습니다.
+    # 1. 주 강세(1)를 먼저 찾습니다. (가장 중요)
     for i, phon in enumerate(pron):
         if phon.endswith('1'): 
             rhyme_start_index = i
             break
             
-    # 2. 주 강세가 없으면 부 강세(2)를 찾습니다.
+    # 2. 주 강세가 없으면 부 강세(2)를 찾습니다. (다중 음절 단어 보조)
     if rhyme_start_index == -1:
         for i, phon in enumerate(pron):
             if phon.endswith('2'):
@@ -79,20 +77,22 @@ def get_arpabet_and_rhyme_unit(word):
             
     # 3. 강세 모음이 전혀 없는 단어(함께, to, a 등)는 실패 처리합니다.
     if rhyme_start_index == -1:
-        return None, None 
+        return pron, None, None # 원본 pron은 반환하여 UI에서 디버깅 가능하도록 함.
 
     # ARPAbet 발음에서 스트레스 마크 제거
     clean_arpabet = [phon.rstrip('0123') for phon in pron]
     # 라임 유닛 추출 (강세 모음부터 끝까지)
     rhyme_unit = clean_arpabet[rhyme_start_index:]
     
-    return clean_arpabet, rhyme_unit
+    # 원본 pron, 클린 버전, 라임 유닛을 모두 반환
+    return pron, clean_arpabet, rhyme_unit
 
 def arpabet_to_ipa(arpabet_phons):
     """ARPAbet 음소열을 eng-to-ipa를 사용하여 IPA 문자열로 변환합니다."""
     arpabet_str = ', '.join(arpabet_phons)
     try:
         # eng-to-ipa 라이브러리의 모드에 주의하여 IPA 문자열을 반환합니다.
+        # 공백과 강세 마크를 제거하여 깔끔한 음소열만 남깁니다.
         ipa_str = ipa.convert(arpabet_str, mode='arpabet').strip().replace(' ', '').replace('ˈ', '').replace('ˌ', '')
         return ipa_str
     except Exception:
@@ -100,7 +100,6 @@ def arpabet_to_ipa(arpabet_phons):
 
 def calculate_rhyme_score(ipa1, ipa2):
     """두 IPA 문자열의 벡터 유사도 점수 (코사인 유사도)를 계산합니다."""
-    # (로직 개선: 마지막 3개 음소 로직 유지)
     
     phons1 = list(ipa1)[-3:]
     phons2 = list(ipa2)[-3:]
@@ -125,15 +124,20 @@ def calculate_rhyme_score(ipa1, ipa2):
 def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     """CMUDict 전체를 검색하여 라임 유닛이 일치하는 후보를 찾고 점수를 매깁니다."""
     
-    target_arpabet, target_rhyme_unit = get_arpabet_and_rhyme_unit(target_word)
+    # 반환 값이 세 개로 변경됨
+    target_pron_raw, target_arpabet_clean, target_rhyme_unit = get_arpabet_and_rhyme_unit(target_word)
     
     if not target_rhyme_unit:
-        return {"target_word": target_word, "target_ipa": "N/A", "candidates": []}
+        # 라임 유닛 추출에 실패하면 원본 ARPAbet만 반환하여 UI에 표시 (디버깅용)
+        return {"target_word": target_word, "target_ipa": "N/A", "raw_arpabet": target_pron_raw, "candidates": []}
 
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
     candidates_list = []
     
+    # ----------------------------------------------------------------
+    # CMUDict 전체 스캔 로직
+    # ----------------------------------------------------------------
     for word, pron_list in p_dict.items():
         pron_arpabet = pron_list[0]
         pron_clean = [p.rstrip('0123') for p in pron_arpabet]
@@ -142,7 +146,6 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
             continue
             
         # 끝 부분이 라임 유닛과 일치하는지 확인 (Near Rhyme 후보군 필터링)
-        # CMUDict 라임 로직은 발음의 끝 부분이 일치하는 단어를 찾습니다.
         if pron_clean[-len(target_rhyme_unit):] == target_rhyme_unit:
             
             candidate_ipa = arpabet_to_ipa(pron_clean)
@@ -160,6 +163,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     return {
         "target_word": target_word,
         "target_ipa": target_ipa,
+        "raw_arpabet": target_pron_raw, # 디버깅용으로 추가
         "candidates": candidates_list[:top_n]
     }
 
@@ -189,7 +193,9 @@ if input_word:
     with st.spinner('CMUDict를 스캔하고 음소 임베딩을 계산 중...'):
         analysis_result = get_rhyme_candidates_with_score(input_word)
     
-    # 1. IPA 표시
+    # --- 디버깅 정보 출력 ---
+    st.markdown("#### 🚨 디버깅 정보 (발표 시 숨김 권장)")
+    st.markdown(f"**CMUDict 원본 발음 (ARPAbet):** `{analysis_result.get('raw_arpabet')}`")
     st.markdown(f"**대상 단어 IPA (라임 유닛):** `{analysis_result['target_ipa']}`")
     
     # 2. 유사도 테이블 표시
@@ -211,8 +217,16 @@ if input_word:
         st.dataframe(data, use_container_width=True, hide_index=True)
     else:
         st.warning(f"CMUDict에서 '{input_word}'에 대한 라임 유닛을 찾지 못했습니다. (단어가 사전에 없거나 너무 짧을 수 있습니다.)")
+        if analysis_result.get('raw_arpabet'):
+            st.error("오류 원인: **주 강세(1) 또는 부 강세(2)**를 찾지 못하여 라임 유닛 추출에 실패했습니다. 단어의 강세를 확인해주세요.")
 
     # 3. Gemini가 받을 API 응답 (발표 강조점)
     st.markdown("---")
     st.markdown("#### 🤖 Gemini에게 제공할 최종 API 응답 (JSON)")
-    st.code(json.dumps(analysis_result, indent=2), language='json')
+    # UI에 표시되는 JSON에서는 디버깅 정보 제외
+    final_json_output = {
+        "target_word": analysis_result["target_word"],
+        "target_ipa": analysis_result["target_ipa"],
+        "candidates": analysis_result["candidates"]
+    }
+    st.code(json.dumps(final_json_output, indent=2), language='json')
