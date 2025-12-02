@@ -5,15 +5,23 @@ from scipy.spatial.distance import cosine
 import json
 import nltk
 from nltk.corpus import cmudict
+import sys
+import os
 
 # --- CMUDict 다운로드 및 로드 ---
-# Streamlit Cloud 환경에서 nltk 데이터를 다운로드합니다.
+# Python 3.13 호환성을 위해 NLTK 예외 처리를 변경합니다.
 @st.cache_resource
 def load_cmudict():
     try:
+        # CMUDict 데이터가 로컬에 있는지 확인합니다.
         nltk.data.find('corpora/cmudict')
-    except nltk.downloader.DownloadError:
+    except LookupError: # <--- NLTK 데이터가 없을 때 발생하는 일반적인 예외
+        # 데이터가 없으면 다운로드합니다. (Streamlit Cloud에서 자동 실행)
         nltk.download('cmudict')
+    except AttributeError:
+        # 매우 오래된 버전에서 발생하는 예외를 대비합니다.
+        nltk.download('cmudict')
+        
     return cmudict.dict()
 
 p_dict = load_cmudict()
@@ -51,8 +59,6 @@ def get_arpabet_and_rhyme_unit(word):
 
     pron = p_dict[word][0] 
     
-    # 강세 모음(stressed vowel)을 찾아 라임 유닛을 분리합니다.
-    # ARPAbet에서 강세 모음은 1로 끝납니다.
     rhyme_start_index = -1
     for i, phon in enumerate(pron):
         if phon[-1] in ('1', '2'): 
@@ -60,23 +66,17 @@ def get_arpabet_and_rhyme_unit(word):
             break
             
     if rhyme_start_index == -1:
-        # 강세 모음이 없는 단어(예: a, the) 처리 방지
         return None, None 
 
-    # ARPAbet 발음에서 스트레스 마크 제거
     clean_arpabet = [phon.rstrip('0123') for phon in pron]
-    
-    # 라임 유닛 추출 (강세 모음부터 끝까지)
     rhyme_unit = clean_arpabet[rhyme_start_index:]
     
     return clean_arpabet, rhyme_unit
 
 def arpabet_to_ipa(arpabet_phons):
     """ARPAbet 음소열을 eng-to-ipa를 사용하여 IPA 문자열로 변환합니다."""
-    # eng-to-ipa가 ARPAbet을 인식하도록 쉼표로 연결
     arpabet_str = ', '.join(arpabet_phons)
     try:
-        # IPA 결과에서 불필요한 공백, 강세 마크를 제거합니다.
         ipa_str = ipa.convert(arpabet_str, mode='arpabet').strip().replace(' ', '').replace('ˈ', '').replace('ˌ', '')
         return ipa_str
     except Exception:
@@ -84,9 +84,6 @@ def arpabet_to_ipa(arpabet_phons):
 
 def calculate_rhyme_score(ipa1, ipa2):
     """두 IPA 문자열의 벡터 유사도 점수 (코사인 유사도)를 계산합니다."""
-    # (로직 개선: 마지막 3개 음소가 아닌, 라임 유닛 전체의 벡터를 사용하도록 확장 가능하나,
-    # 데모의 일관성을 위해 마지막 3개 음소 로직을 유지합니다.)
-    
     phons1 = list(ipa1)[-3:]
     phons2 = list(ipa2)[-3:]
     
@@ -110,18 +107,15 @@ def calculate_rhyme_score(ipa1, ipa2):
 def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     """CMUDict 전체를 검색하여 라임 유닛이 일치하는 후보를 찾고 점수를 매깁니다."""
     
-    # 1. 대상 단어의 라임 유닛 (ARPAbet) 추출
     target_arpabet, target_rhyme_unit = get_arpabet_and_rhyme_unit(target_word)
     
     if not target_rhyme_unit:
-        # G2P 실패 또는 단어가 사전에 없음
         return {"target_word": target_word, "target_ipa": "N/A", "candidates": []}
 
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
     candidates_list = []
     
-    # 2. CMUDict 전체를 스캔하여 라임 후보군 검색
     for word, pron_list in p_dict.items():
         pron_arpabet = pron_list[0]
         pron_clean = [p.rstrip('0123') for p in pron_arpabet]
@@ -129,14 +123,10 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
         if word == target_word.lower() or len(word) <= 2 or len(pron_clean) < len(target_rhyme_unit): 
             continue
             
-        # 끝 부분이 라임 유닛과 일치하는지 확인 (Near Rhyme 후보군 필터링)
         if pron_clean[-len(target_rhyme_unit):] == target_rhyme_unit:
             
-            # 3. 음소 임베딩 점수 계산
             candidate_ipa = arpabet_to_ipa(pron_clean)
             if candidate_ipa:
-                # 라임 유닛(IPA)을 사용하여 유사도 점수 계산
-                # (target_ipa는 라임 유닛만 담고 있음)
                 score = calculate_rhyme_score(target_ipa, candidate_ipa) 
                 
                 candidates_list.append({
@@ -145,7 +135,6 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
                     "ipa": candidate_ipa
                 })
 
-    # 4. 유사도 점수가 높은 상위 N개 후보 추출
     candidates_list.sort(key=lambda x: x['score'], reverse=True)
 
     return {
@@ -167,7 +156,7 @@ st.caption("✅ CMUDict 기반으로 전체 영어 단어 검색 가능 (기말 
 st.markdown("""
 이 툴은 **수동 딕셔너리** 대신 **CMUDict (13만 단어)**를 활용하여, 
 입력 단어와 **음소 유사성**이 높은 모든 단어를 검색하고 점수를 매깁니다. 
-이 JSON 결과가 Gemini에게 **정량적인 도구 정보**로 제공될 **API 응답**입니다.
+이 JSON 결과가 Gemini에게 제공할 **API 응답**입니다.
 """)
 
 # 사용자 입력
@@ -203,7 +192,7 @@ if input_word:
     else:
         st.warning(f"CMUDict에서 '{input_word}'에 대한 라임 유닛을 찾지 못했습니다. (단어가 사전에 없거나 너무 짧을 수 있습니다.)")
 
-    # 3. Gemini에게 받을 API 응답 (발표 강조점)
+    # 3. Gemini가 받을 API 응답 (발표 강조점)
     st.markdown("---")
     st.markdown("#### 🤖 Gemini에게 제공할 최종 API 응답 (JSON)")
     st.code(json.dumps(analysis_result, indent=2), language='json')
