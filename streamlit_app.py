@@ -13,7 +13,6 @@ import os
 @st.cache_resource(show_spinner="CMUDict 사전을 로드 중...")
 def load_cmudict():
     try:
-        # CMUDict 데이터가 로컬에 있는지 확인합니다.
         nltk.data.find('corpora/cmudict')
     except LookupError: # NLTK 데이터가 없을 때 발생하는 일반적인 예외
         # 데이터 다운로드 및 로드
@@ -62,34 +61,36 @@ def get_arpabet_and_rhyme_unit(word):
     
     rhyme_start_index = -1
     
-    # 1. 주 강세(1)를 먼저 찾습니다. (가장 중요)
+    # 1. 주 강세(1)를 먼저 찾습니다. (라임의 시작점)
     for i, phon in enumerate(pron):
         if phon.endswith('1'): 
             rhyme_start_index = i
             break
             
-    # 2. 주 강세가 없으면 부 강세(2)를 찾습니다. (다중 음절 단어 보조)
+    # 2. 주 강세가 없으면 부 강세(2)를 찾습니다.
     if rhyme_start_index == -1:
         for i, phon in enumerate(pron):
             if phon.endswith('2'):
                 rhyme_start_index = i
                 break
             
-    # 3. 강세 모음이 전혀 없는 단어(함께, to, a 등)는 실패 처리합니다.
+    # 3. 강세 모음이 없는 단어는 실패 처리
     if rhyme_start_index == -1:
-        return pron, None, None # 원본 pron은 반환하여 UI에서 디버깅 가능하도록 함.
+        return pron, None, None 
 
-    # ARPAbet 발음에서 스트레스 마크 제거
-    clean_arpabet = [phon.rstrip('0123') for phon in pron]
     # 라임 유닛 추출 (강세 모음부터 끝까지)
-    rhyme_unit = clean_arpabet[rhyme_start_index:]
+    rhyme_unit_raw = pron[rhyme_start_index:]
     
-    # 원본 pron, 클린 버전, 라임 유닛을 모두 반환
-    return pron, clean_arpabet, rhyme_unit
+    # ARPAbet 발음에서 스트레스 마크 제거 (비교를 위해)
+    rhyme_unit_clean = [phon.rstrip('0123') for phon in rhyme_unit_raw]
+    
+    # 원본 pron, 클린 라임 유닛, 클린 버전(전체)을 반환
+    return pron, rhyme_unit_clean, [p.rstrip('0123') for p in pron]
+
 
 def arpabet_to_ipa(arpabet_phons):
     """ARPAbet 음소열을 eng-to-ipa를 사용하여 IPA 문자열로 변환합니다."""
-    arpabet_str = ', '.join(arpabet_phons)
+    arpabet_str = ' '.join(arpabet_phons) # eng-to-ipa는 공백으로 구분된 ARPAbet 문자열을 기대합니다.
     try:
         # eng-to-ipa 라이브러리의 모드에 주의하여 IPA 문자열을 반환합니다.
         # 공백과 강세 마크를 제거하여 깔끔한 음소열만 남깁니다.
@@ -101,6 +102,7 @@ def arpabet_to_ipa(arpabet_phons):
 def calculate_rhyme_score(ipa1, ipa2):
     """두 IPA 문자열의 벡터 유사도 점수 (코사인 유사도)를 계산합니다."""
     
+    # 마지막 3개 음소 로직 유지 (근사 라임 기준)
     phons1 = list(ipa1)[-3:]
     phons2 = list(ipa2)[-3:]
     
@@ -124,13 +126,14 @@ def calculate_rhyme_score(ipa1, ipa2):
 def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     """CMUDict 전체를 검색하여 라임 유닛이 일치하는 후보를 찾고 점수를 매깁니다."""
     
-    # 반환 값이 세 개로 변경됨
-    target_pron_raw, target_arpabet_clean, target_rhyme_unit = get_arpabet_and_rhyme_unit(target_word)
+    # 반환 값이 세 개로 변경됨: 원본 발음, 라임 유닛 클린, 전체 클린 발음
+    target_pron_raw, target_rhyme_unit, target_arpabet_clean_full = get_arpabet_and_rhyme_unit(target_word)
     
     if not target_rhyme_unit:
-        # 라임 유닛 추출에 실패하면 원본 ARPAbet만 반환하여 UI에 표시 (디버깅용)
+        # 라임 유닛 추출에 실패하면 원본 ARPAbet만 반환하여 UI에 표시
         return {"target_word": target_word, "target_ipa": "N/A", "raw_arpabet": target_pron_raw, "candidates": []}
 
+    # 라임 유닛 IPA 변환 (이 IPA가 점수 계산에 사용됩니다)
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
     candidates_list = []
@@ -140,16 +143,31 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
     # ----------------------------------------------------------------
     for word, pron_list in p_dict.items():
         pron_arpabet = pron_list[0]
-        pron_clean = [p.rstrip('0123') for p in pron_arpabet]
         
-        if word == target_word.lower() or len(word) <= 2 or len(pron_clean) < len(target_rhyme_unit): 
+        # 후보 단어의 라임 유닛을 추출합니다. (CMUDict 표준 라임 정의)
+        candidate_rhyme_start_index = -1
+        for i, phon in enumerate(pron_arpabet):
+            if phon.endswith('1'): 
+                candidate_rhyme_start_index = i
+                break
+        
+        if candidate_rhyme_start_index == -1: continue # 주 강세가 없는 단어는 건너뜁니다.
+        
+        candidate_rhyme_unit = pron_arpabet[candidate_rhyme_start_index:]
+        candidate_rhyme_unit_clean = [p.rstrip('0123') for p in candidate_rhyme_unit]
+        
+        # 1. 단어 필터링 (자기 자신, 너무 짧은 단어)
+        if word == target_word.lower() or len(word) <= 2:
             continue
             
-        # 끝 부분이 라임 유닛과 일치하는지 확인 (Near Rhyme 후보군 필터링)
-        if pron_clean[-len(target_rhyme_unit):] == target_rhyme_unit:
+        # 2. CMUDict 라임 기준: 라임 유닛의 발음이 정확히 일치하는 단어만 필터링합니다.
+        if candidate_rhyme_unit_clean == target_rhyme_unit:
             
-            candidate_ipa = arpabet_to_ipa(pron_clean)
+            # IPA 변환 (점수 계산용)
+            candidate_ipa = arpabet_to_ipa(candidate_rhyme_unit) # 라임 유닛만 변환
+            
             if candidate_ipa:
+                # IPA 기반 음소 임베딩 점수 계산
                 score = calculate_rhyme_score(target_ipa, candidate_ipa) 
                 
                 candidates_list.append({
@@ -218,7 +236,7 @@ if input_word:
     else:
         st.warning(f"CMUDict에서 '{input_word}'에 대한 라임 유닛을 찾지 못했습니다. (단어가 사전에 없거나 너무 짧을 수 있습니다.)")
         if analysis_result.get('raw_arpabet'):
-            st.error("오류 원인: **주 강세(1) 또는 부 강세(2)**를 찾지 못하여 라임 유닛 추출에 실패했습니다. 단어의 강세를 확인해주세요.")
+            st.error(f"오류 원인: CMUDict에 단어가 있지만 주 강세(1)를 찾지 못하여 라임 유닛 추출에 실패했습니다. 원본 발음: {analysis_result.get('raw_arpabet')}")
 
     # 3. Gemini가 받을 API 응답 (발표 강조점)
     st.markdown("---")
