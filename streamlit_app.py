@@ -20,44 +20,58 @@ def load_cmudict():
 p_dict = load_cmudict()
 
 # =========================================================
-# 1. 음소 임베딩 (Slant Rhyme 계산용: 모음/자음 유사도 강화)
+# 1. 음소 임베딩 강화 (에미넴 스타일 Slant Rhyme 반영)
+#    - 유성/무성 쌍의 유사도를 높여 Slant Rhyme 점수 개선
 # =========================================================
 
-# ARPAbet 기호에 언어학적 특징을 반영한 벡터 정의 (예시: 5차원)
+# ARPAbet 기호에 언어학적 특징 반영: [모음, 비음, 발성, 조음위치, 조음방법]
 PHONEME_EMBEDDINGS: Dict[str, np.ndarray] = {
-    # Vowels (모음): 
-    'AE': np.array([1.0, 0.1, 0.2, 0.0, 1.0]),  # 'cat' (æ)
-    'IY': np.array([0.9, 0.1, 0.0, 0.0, 1.0]),  # 'feel' (i)
-    'IH': np.array([0.8, 0.1, 0.1, 0.0, 1.0]),  # 'sit' (ɪ) - IY와 유사
-    'AH': np.array([0.7, 0.2, 0.5, 0.0, 1.0]),  # 'cut' (ʌ) 
-    'ER': np.array([0.6, 0.0, 0.5, 0.5, 1.0]),  # 'R-colored' vowel
+    # Vowels (모음): 모음끼리는 유사, 자음과 거리를 둠
+    'AE': np.array([1.0, 0.1, 1.0, 0.2, 0.0]),  # 'cat' (æ)
+    'IY': np.array([0.9, 0.1, 1.0, 0.0, 0.0]),  # 'feel' (i)
+    'IH': np.array([0.8, 0.1, 1.0, 0.1, 0.0]),  # 'sit' (ɪ)
+    'AH': np.array([0.7, 0.2, 1.0, 0.5, 0.0]),  # 'cut' (ʌ) 
+    'ER': np.array([0.6, 0.0, 1.0, 0.5, 0.5]),  # 'R-colored' vowel
+    'AA': np.array([0.9, 0.1, 1.0, 0.8, 0.0]),  # 'car' (ɑ)
     
-    # Consonants (자음): 
-    'T': np.array([0.0, 0.8, 0.2, 0.9, 0.0]),
-    'D': np.array([0.0, 0.8, 0.2, 0.9, 1.0]), 
-    'N': np.array([0.0, 0.9, 0.2, 0.8, 1.0]),
-    'K': np.array([0.0, 0.5, 0.8, 0.9, 0.0]),
-    'G': np.array([0.0, 0.5, 0.8, 0.9, 1.0]),
-    'L': np.array([0.0, 0.0, 0.7, 0.4, 1.0]),
-    'M': np.array([0.0, 0.9, 0.1, 0.8, 1.0]),
-    'W': np.array([0.3, 0.0, 0.9, 0.3, 1.0]),
-    'Y': np.array([0.3, 0.0, 0.1, 0.3, 1.0]),
-    'R': np.array([0.1, 0.0, 0.5, 0.5, 1.0]),
-    'S': np.array([0.0, 0.0, 0.2, 0.7, 0.0]),
+    # Consonants (자음): 조음 위치(4번째 벡터)와 방법(5번째 벡터) 유사도 집중
+    # T/D, K/G, F/V 등 유성/무성 쌍은 발성(3번째 벡터)만 다르게 하여 유사도 극대화
+    # T/D (치경 파열음)
+    'T': np.array([0.0, 0.8, 0.0, 0.3, 0.9]),   # 무성
+    'D': np.array([0.0, 0.8, 1.0, 0.3, 0.9]),   # 유성
+    # K/G (연구개 파열음)
+    'K': np.array([0.0, 0.5, 0.0, 0.8, 0.9]),   # 무성
+    'G': np.array([0.0, 0.5, 1.0, 0.8, 0.9]),   # 유성
+    # F/V (순치 마찰음)
+    'F': np.array([0.0, 0.5, 0.0, 0.1, 0.7]),   # 무성
+    'V': np.array([0.0, 0.5, 1.0, 0.1, 0.7]),   # 유성
+    # S/Z (치경 마찰음)
+    'S': np.array([0.0, 0.0, 0.0, 0.3, 0.7]),   # 무성
+    'Z': np.array([0.0, 0.0, 1.0, 0.3, 0.7]),   # 유성
+    
+    # 비음 (N, M, NG)
+    'N': np.array([0.0, 0.9, 1.0, 0.3, 0.8]),
+    'M': np.array([0.0, 0.9, 1.0, 0.1, 0.8]),
+    'NG': np.array([0.0, 0.9, 1.0, 0.8, 0.8]),
+    
+    # 유음/활음
+    'L': np.array([0.0, 0.0, 1.0, 0.7, 0.4]),
+    'R': np.array([0.1, 0.0, 1.0, 0.5, 0.5]),
 }
 
 def get_embedding(phon: str) -> np.ndarray:
     """정의된 음소 임베딩을 가져오고, 없으면 0 벡터를 반환합니다."""
+    # 정의되지 않은 CMUDict 음소는 0 벡터로 처리
     return PHONEME_EMBEDDINGS.get(phon.upper(), np.zeros(5))
 
 # =========================================================
-# 2. 핵심 수정 함수: 라임 유닛 추출 (강세 모음 기준)
+# 2. 핵심 함수: 라임 유닛 추출 (강세 모음 기준)
 # =========================================================
 
-def get_rhyme_unit(word: str) -> Optional[Tuple[List[str], List[str], List[str], str]]:
+def get_rhyme_unit(word: str) -> Optional[Tuple[List[str], List[str], List[str]]]:
     """
-    단어의 발음에서 마지막 강세 모음을 기준으로 라임 유닛을 추출합니다.
-    (반환: 원본 발음, Onset(두음), Rhyme Unit(운), Stressed Vowel)
+    단어의 발음에서 마지막 강세 모음(1 또는 2)을 기준으로 라임 유닛을 추출합니다.
+    (반환: 원본 발음, Onset(두음), Rhyme Unit(운))
     """
     word = word.lower()
     if word not in p_dict:
@@ -65,29 +79,23 @@ def get_rhyme_unit(word: str) -> Optional[Tuple[List[str], List[str], List[str],
         
     pron_raw = p_dict[word][0]
     
-    # 마지막 강세 모음 (1차 '1' 또는 2차 '2')의 인덱스를 찾습니다.
     stress_markers = ['1', '2']
     stress_indices = [i for i, phon in enumerate(pron_raw) if phon[-1] in stress_markers]
     
     if not stress_indices:
-        # 강세가 없는 단어는 전체를 라임 유닛으로 간주 (첫 음소부터)
         start_index = 0
     else:
         # 가장 마지막 강세 위치를 라임 유닛의 시작점으로 삼습니다.
         start_index = stress_indices[-1]
         
-    # 라임 유닛 분리
     onset_raw = pron_raw[:start_index] 
     rhyme_unit_raw = pron_raw[start_index:]
-    
-    stressed_vowel_raw = rhyme_unit_raw[0] if rhyme_unit_raw else ""
     
     # 스트레스 마크 제거 (순수 음소만 남깁니다.)
     onset_clean = [phon.rstrip('0123') for phon in onset_raw]
     rhyme_unit_clean = [phon.rstrip('0123') for phon in rhyme_unit_raw]
-    stressed_vowel_clean = stressed_vowel_raw.rstrip('0123')
 
-    return pron_raw, onset_clean, rhyme_unit_clean, stressed_vowel_clean
+    return pron_raw, onset_clean, rhyme_unit_clean
 
 # ---------------------------------------------------------
 # IPA 변환 함수 (디버깅 및 표시용)
@@ -130,7 +138,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
     if not target_info:
         return {"target_word": target_word, "target_ipa": "N/A", "target_rhyme_unit": "N/A", "raw_arpabet": "N/A", "candidates": []}
 
-    target_pron_raw, target_onset, target_rhyme_unit, target_vowel = target_info
+    target_pron_raw, target_onset, target_rhyme_unit = target_info
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
     if not target_ipa or not target_rhyme_unit:
@@ -148,7 +156,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
         if not candidate_info:
             continue
             
-        candidate_pron_raw, candidate_onset, candidate_rhyme_unit, candidate_vowel = candidate_info
+        candidate_pron_raw, candidate_onset, candidate_rhyme_unit = candidate_info
         
         if word == target_word.lower():
             continue
@@ -157,37 +165,33 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
         rhyme_type = "Slant/Poor Match"
         
         # A. Perfect Rhyme (완벽한 라임) 검사
-        # 1. 라임 유닛 길이가 같아야 함
         if len(candidate_rhyme_unit) == target_rhyme_len:
-            # 2. 강세 모음부터 끝까지 음소가 완전히 일치해야 함
             if candidate_rhyme_unit == target_rhyme_unit:
-                # 3. Onset Check: 강세 모음 앞의 마지막 음소는 달라야 함 (e.g., 'cat'/'sat'은 True Rhyme, 'cat'/'cater'는 아님)
+                # Onset Check: 강세 모음 앞의 마지막 음소는 달라야 함
                 is_onset_different = (not target_onset or not candidate_onset or target_onset[-1] != candidate_onset[-1])
                 
                 if is_onset_different:
                     score = 1.0 
                     rhyme_type = "Perfect Rhyme (True Rhyme)"
-                # Onset이 같으면 Slant Rhyme 계산으로 넘어감 (예외적인 Near Rhyme)
         
         # B. Slant Rhyme (불완전 라임) 및 Multi-Syllable Rhyme 검사
+        # (Perfect Rhyme이 아니거나, Onset이 같아서 Perfect Rhyme에서 제외된 경우)
         if score < 1.0:
             
-            # 멀티-음절 라임을 위한 Slant Rhyme 계산
+            # 멀티-음절 라임을 위한 Slant Rhyme 계산 (길이 차이가 음소 2개 이하인 경우만 계산)
             len_diff = abs(len(candidate_rhyme_unit) - target_rhyme_len)
             
-            # 길이 차이가 음소 2개 이하인 경우만 계산
             if len_diff <= 2: 
                 
                 # 코사인 유사도 계산
                 slant_score = calculate_slant_score(target_rhyme_unit, candidate_rhyme_unit)
                 
-                # 완벽 라임은 아니지만, 음소 유사도가 높을 때
-                if slant_score >= 0.85: 
+                if slant_score >= 0.90: # 유성/무성 쌍 조정으로 기준 점수를 0.90으로 상향
                     score = slant_score
-                    rhyme_type = "Multi-Syllable Slant Rhyme"
-                elif slant_score >= 0.70:
+                    rhyme_type = "Multi-Syllable Slant Rhyme (Near Perfect)"
+                elif slant_score >= 0.80:
                     score = slant_score
-                    rhyme_type = "Near Rhyme"
+                    rhyme_type = "Slant Rhyme (Good Match)"
                 else:
                     continue # 점수가 너무 낮으면 제외
             else:
@@ -215,16 +219,16 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 
 
 # =========================================================
-# 3. Streamlit UI (수정된 로직 반영)
+# 3. Streamlit UI 
 # =========================================================
 
 st.set_page_config(page_title="Phonetics Analyzer (Advanced Rhyme)", layout="centered")
 
-st.title("🎤 CMUDict 통합: 고급 라임 분석기 (강세 & 슬랜트 반영)")
-st.caption("✅ **마지막 강세 모음**부터 라임 유닛을 추출하고, **멀티-음절 슬랜트 라임**을 위한 유사도 점수를 계산합니다.")
+st.title("🎤 CMUDict 통합: 에미넴 스타일 고급 라임 분석기")
+st.caption("✅ **마지막 강세 모음**부터 라임 유닛을 추출하며, **유성/무성 자음 쌍** 유사도를 높여 슬랜트 라임을 정교하게 계산합니다.")
 
 # 사용자 입력
-input_word = st.text_input("분석할 단어를 입력하세요 (예: magical, mind, computer)", "magical")
+input_word = st.text_input("분석할 단어를 입력하세요 (예: together, critical, machine)", "critical")
 
 if input_word:
     st.subheader(f"🔍 '{input_word}'에 대한 CMUDict 기반 분석 결과")
@@ -247,6 +251,7 @@ if input_word:
         # 테이블 데이터 준비
         data = []
         for c in analysis_result['candidates']:
+            # Perfect Rhyme과 Multi-Syllable Slant Rhyme을 구분하여 보여줍니다.
             data.append({
                 "Word": c['word'],
                 "Rhyme Unit (ARPAbet)": c['rhyme_unit'],
