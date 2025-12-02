@@ -3,3 +3,4 @@ requests
 eng-to-ipa==0.0.2
 numpy
 scipy
+nltk
