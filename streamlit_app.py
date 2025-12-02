@@ -74,9 +74,18 @@ def get_arpabet_and_rhyme_unit(word):
                 rhyme_start_index = i
                 break
             
-    # 3. 강세 모음이 없는 단어는 실패 처리
+    # 3. 강세 모음이 없는 단어는 실패 처리 (주로 to, a, the 등 기능어)
     if rhyme_start_index == -1:
-        return pron, None, None 
+        # 모든 모음에 강세가 없는 경우, 마지막 모음부터 라임 유닛으로 간주 (일반적인 CMUDict 라임 규칙)
+        # 모든 음소의 마지막 문자가 숫자인지 확인 (모음 판별)
+        last_vowel_index = -1
+        for i in range(len(pron) -1, -1, -1):
+            if pron[i][-1].isdigit(): # 숫자로 끝나는 음소(모음) 발견
+                rhyme_start_index = i
+                break
+        
+        if rhyme_start_index == -1:
+             return pron, None, None # 정말로 강세 모음이 없는 경우 실패
 
     # 라임 유닛 추출 (강세 모음부터 끝까지)
     rhyme_unit_raw = pron[rhyme_start_index:]
@@ -146,12 +155,21 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
         
         # 후보 단어의 라임 유닛을 추출합니다. (CMUDict 표준 라임 정의)
         candidate_rhyme_start_index = -1
+        
+        # 1. 주 강세(1)를 먼저 찾습니다.
         for i, phon in enumerate(pron_arpabet):
             if phon.endswith('1'): 
                 candidate_rhyme_start_index = i
                 break
         
-        if candidate_rhyme_start_index == -1: continue # 주 강세가 없는 단어는 건너뜁니다.
+        # 2. 주 강세가 없으면 부 강세(2)를 찾습니다.
+        if candidate_rhyme_start_index == -1:
+            for i, phon in enumerate(pron_arpabet):
+                if phon.endswith('2'):
+                    candidate_rhyme_start_index = i
+                    break
+        
+        if candidate_rhyme_start_index == -1: continue # 주/부 강세가 없는 단어는 건너뜁니다.
         
         candidate_rhyme_unit = pron_arpabet[candidate_rhyme_start_index:]
         candidate_rhyme_unit_clean = [p.rstrip('0123') for p in candidate_rhyme_unit]
@@ -161,6 +179,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100):
             continue
             
         # 2. CMUDict 라임 기준: 라임 유닛의 발음이 정확히 일치하는 단어만 필터링합니다.
+        # 즉, candidate_rhyme_unit_clean의 발음 순서가 target_rhyme_unit과 정확히 일치해야 합니다.
         if candidate_rhyme_unit_clean == target_rhyme_unit:
             
             # IPA 변환 (점수 계산용)
