@@ -20,14 +20,14 @@ def load_cmudict():
 p_dict = load_cmudict()
 
 # =========================================================
-# 1. 음소 임베딩 최종 조정 (Flow 및 통사적 일치를 위한 벡터 강화)
+# 1. 음소 임베딩 (최종 버전: Flow, Consonance, Assonance 강화)
 # =========================================================
 
 # ARPAbet 기호에 언어학적 특징 반영: [모음, 비음, 발성, 조음위치, 조음방법]
 PHONEME_EMBEDDINGS: Dict[str, np.ndarray] = {
-    # Vowels (모음): IY의 중요도와 모음 계열의 인접성 강화
+    # Vowels (모음): IY (long E)의 중요도와 모음 계열의 인접성 강화
     'AE': np.array([1.0, 0.1, 1.0, 0.2, 0.0]),
-    'IY': np.array([0.95, 0.1, 1.0, 0.0, 0.0]), # 중요도 소폭 강화
+    'IY': np.array([0.95, 0.1, 1.0, 0.0, 0.0]), # '-ee' 종결 라임 (Moby/Obie) 중요도 강화
     'IH': np.array([0.9, 0.1, 1.0, 0.1, 0.0]),
     'AH': np.array([0.7, 0.2, 1.0, 0.5, 0.0]),
     'AY': np.array([0.9, 0.1, 1.0, 0.3, 0.1]),
@@ -50,7 +50,7 @@ PHONEME_EMBEDDINGS: Dict[str, np.ndarray] = {
     'F': np.array([0.0, 0.5, 0.0, 0.1, 0.7]),
     'V': np.array([0.0, 0.5, 1.0, 0.1, 0.7]),
 
-    # L/R/Y/W 계열: 'lawyer' vs 'wardrobe' 및 Chain Rhyme 구현을 위해 모음과 유사한 특성 부여
+    # L/R/Y/W 계열: 'jaw you' vs 'lawyer' 등 복잡한 유동성 라임의 점수를 안정화
     'L': np.array([0.6, 0.0, 1.0, 0.7, 0.3]),
     'R': np.array([0.6, 0.0, 1.0, 0.5, 0.4]),
     'Y': np.array([0.7, 0.0, 1.0, 0.1, 0.1]),
@@ -97,7 +97,7 @@ def arpabet_to_ipa(arpabet_phons: List[str]) -> Optional[str]:
     return "".join([p for p in ipa_phons if p])
 
 def calculate_slant_score(phon_list1: List[str], phon_list2: List[str], target_vowel: str, candidate_vowel: str) -> float:
-    """모음 일치 가중치를 포함한 슬랜트 점수를 계산합니다."""
+    """모음 일치 가중치를 포함한 슬랜트 점수를 계산합니다. (Score > 1.0 버그 수정됨)"""
     len1, len2 = len(phon_list1), len(phon_list2)
     max_len = max(len1, len2)
     
@@ -116,7 +116,9 @@ def calculate_slant_score(phon_list1: List[str], phon_list2: List[str], target_v
     if target_vowel and target_vowel == candidate_vowel:
         vowel_bonus = 0.05 
 
-    return max(0, similarity + vowel_bonus)
+    # --- Score > 1.0 버그 수정: 보너스를 더한 후, 최대값을 1.0으로 설정 ---
+    final_score = similarity + vowel_bonus
+    return min(1.0, max(0, final_score))
 
 
 @st.cache_data(show_spinner=False)
@@ -173,6 +175,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
             slant_score = calculate_slant_score(target_rhyme_unit, candidate_rhyme_unit, target_vowel, candidate_vowel)
             score = slant_score
             
+            # 랩 가사 분석을 반영한 기준 (0.95는 Near Perfect, 0.85는 Good Match)
             if score >= 0.95: 
                 rhyme_type = "Multi-Syllable Slant Rhyme (Near Perfect)"
             elif score >= 0.85:
@@ -209,7 +212,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 st.set_page_config(page_title="Phonetics Analyzer (Eminem Style Slant Rhyme)", layout="centered")
 
 st.title("🎤 CMUDict 통합: 에미넴 스타일 고급 라임 분석기 (최종)")
-st.caption("✅ **Flow 및 통사적 일치**를 위한 활음/치경음 유사도가 강화되었으며, 완벽 라임은 제외합니다.")
+st.caption("✅ **Score > 1.0 버그가 수정**되었으며, Flow와 통사적 일치를 위한 벡터가 강화되었습니다.")
 
 # 사용자 입력
 input_word = st.text_input("분석할 단어를 입력하세요 (예: together, recently, lawyer)", "lawyer")
