@@ -240,8 +240,8 @@ st.set_page_config(page_title="Phonetics Analyzer (Rhyme Classification)", layou
 st.title("🎤 CMUDict 통합: 에미넴 스타일 라임 분류 분석기 (최종)")
 st.caption("✅ Front Rhyme 구현 및 Score 버그 수정 완료. 이 코드는 NameError를 해결합니다.")
 
-# 사용자 입력
-input_word = st.text_input("분석할 단어를 입력하세요 (예: together, recently, lawyer)", "recently")
+# 🌟 수정: input_word의 초기값을 빈 문자열로 설정하여 자동 검색을 막습니다.
+input_word = st.text_input("분석할 단어를 입력하세요 (예: together, recently, lawyer)", "")
 
 if input_word:
     st.subheader(f"🔍 '{input_word}'에 대한 CMUDict 기반 분석 결과")
