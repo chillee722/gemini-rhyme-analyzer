@@ -20,7 +20,7 @@ def load_cmudict():
 p_dict = load_cmudict()
 
 # =========================================================
-# 1. 음소 임베딩 (최종 버전 유지)
+# 1. 음소 임베딩 (최종 버전: Flow, Consonance, Assonance 강화)
 # =========================================================
 
 # ARPAbet 기호에 언어학적 특징 반영: [모음, 비음, 발성, 조음위치, 조음방법]
@@ -48,6 +48,18 @@ def get_embedding(phon: str) -> np.ndarray:
     """정의된 음소 임베딩을 가져오고, 없으면 0 벡터를 반환합니다."""
     return PHONEME_EMBEDDINGS.get(phon.upper(), np.zeros(5))
 
+# ---------------------------------------------------------
+# IPA 변환 함수 (NameError 해결을 위해 최상단으로 이동)
+# ---------------------------------------------------------
+ARPABET_TO_IPA_MAP = {
+    'AA': 'ɑ', 'AE': 'æ', 'AH': 'ʌ', 'AO': 'ɔ', 'AW': 'aʊ', 'AY': 'aɪ', 'B': 'b', 'CH': 'ʧ', 'D': 'd', 'DH': 'ð', 'EH': 'ɛ', 'ER': 'əɹ', 'EY': 'eɪ', 'F': 'f', 'G': 'g', 'HH': 'h', 'IH': 'ɪ', 'IY': 'i', 'JH': 'ʤ', 'K': 'k', 'L': 'l', 'M': 'm', 'N': 'n', 'NG': 'ŋ', 'OW': 'oʊ', 'OY': 'ɔɪ', 'P': 'p', 'R': 'r', 'S': 's', 'SH': 'ʃ', 'T': 't', 'TH': 'θ', 'UH': 'ʊ', 'UW': 'u', 'V': 'v', 'W': 'w', 'Y': 'j', 'Z': 'z', 'ZH': 'ʒ',
+}
+
+def arpabet_to_ipa(arpabet_phons: List[str]) -> Optional[str]:
+    """ARPAbet 음소열을 IPA 문자열로 변환합니다."""
+    ipa_phons = [ARPABET_TO_IPA_MAP.get(phon.upper(), '') for phon in arpabet_phons]
+    return "".join([p for p in ipa_phons if p])
+
 # =========================================================
 # 2. 핵심 함수: 라임 유닛 추출 및 점수 계산
 # =========================================================
@@ -70,11 +82,9 @@ def get_rhyme_unit(word: str) -> Optional[Tuple[List[str], List[str], List[str]]
     onset_raw = pron_raw[:start_index] 
     rhyme_unit_raw = pron_raw[start_index:]
     
-    # 스트레스 마크 제거
     onset_clean = [phon.rstrip('0123') for phon in onset_raw]
     rhyme_unit_clean = [phon.rstrip('0123') for phon in rhyme_unit_raw]
 
-    # 반환: (원본 발음, Onset, Rhyme Unit)
     return pron_raw, onset_clean, rhyme_unit_clean
 
 
@@ -84,7 +94,6 @@ def calculate_front_rhyme_score(onset_list1: List[str], onset_list2: List[str]) 
     if not onset_list1 or not onset_list2:
         return 0.0
         
-    # 비교를 위해 가장 짧은 Onset 길이를 기준으로 맞춥니다.
     min_len = min(len(onset_list1), len(onset_list2))
     
     vec1_list = [get_embedding(p) for p in onset_list1[-min_len:]]
@@ -96,7 +105,6 @@ def calculate_front_rhyme_score(onset_list1: List[str], onset_list2: List[str]) 
     if np.linalg.norm(vec1) == 0 or np.linalg.norm(vec2) == 0:
         return 0.0
 
-    # 유사도가 높을수록 1에 가깝습니다.
     return max(0, 1 - cosine(vec1, vec2))
 
 
@@ -135,7 +143,10 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
         return {"target_word": target_word, "target_ipa": "N/A", "target_rhyme_unit": "N/A", "raw_arpabet": "N/A", "candidates": []}
 
     target_pron_raw, target_onset, target_rhyme_unit = target_info
-    target_ipa = arpabet_to_ipa(target_rhyme_unit)
+    
+    # 여기서 arpabet_to_ipa를 호출하므로, 이 함수가 먼저 정의되어 있어야 합니다.
+    target_ipa = arpabet_to_ipa(target_rhyme_unit) 
+    
     target_vowel = target_rhyme_unit[0] if target_rhyme_unit else ""
     target_rhyme_len = len(target_rhyme_unit)
     
@@ -144,10 +155,8 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 
     candidates_list = []
     
-    # --- Front Rhyme 구현을 위한 파라미터 ---
     # Rhyme Unit 유사도(Slant Score)에 Front Rhyme 유사도를 합산할 비율 (가중치)
     FRONT_RHYME_WEIGHT = 0.1 
-    # ------------------------------------------
 
     for word, _ in p_dict.items():
         
@@ -188,7 +197,6 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
                 front_rhyme_similarity = calculate_front_rhyme_score(target_onset, candidate_onset)
                 
             # 3. 최종 점수: Rhyme Unit 유사도 + Front Rhyme 보너스
-            # (총점은 1.0으로 다시 캡을 씌워 오버플로우 방지)
             final_weighted_score = slant_score_base + (front_rhyme_similarity * FRONT_RHYME_WEIGHT)
             score = min(1.0, final_weighted_score)
             
@@ -226,10 +234,10 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 # 3. Streamlit UI (최종)
 # =========================================================
 
-st.set_page_config(page_title="Phonetics Analyzer (Front Rhyme Final)", layout="centered")
+st.set_page_config(page_title="Phonetics Analyzer (Eminem Style Slant Rhyme)", layout="centered")
 
 st.title("🎤 CMUDict 통합: 에미넴 스타일 고급 라임 분석기 (최종)")
-st.caption("✅ **Front Rhyme(두음 유사도)을 명시적으로 계산**하고 점수에 반영하여 복합 라임을 구현합니다. Score 버그 수정 완료.")
+st.caption("✅ Front Rhyme 구현 및 Score 버그 수정 완료. 이 코드는 NameError를 해결합니다.")
 
 # 사용자 입력
 input_word = st.text_input("분석할 단어를 입력하세요 (예: together, recently, lawyer)", "recently")
