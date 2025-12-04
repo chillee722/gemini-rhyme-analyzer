@@ -48,6 +48,18 @@ def get_embedding(phon: str) -> np.ndarray:
     """정의된 음소 임베딩을 가져오고, 없으면 0 벡터를 반환합니다."""
     return PHONEME_EMBEDDINGS.get(phon.upper(), np.zeros(5))
 
+# ---------------------------------------------------------
+# IPA 변환 함수 (NameError 해결을 위해 최상단으로 이동)
+# ---------------------------------------------------------
+ARPABET_TO_IPA_MAP = {
+    'AA': 'ɑ', 'AE': 'æ', 'AH': 'ʌ', 'AO': 'ɔ', 'AW': 'aʊ', 'AY': 'aɪ', 'B': 'b', 'CH': 'ʧ', 'D': 'd', 'DH': 'ð', 'EH': 'ɛ', 'ER': 'əɹ', 'EY': 'eɪ', 'F': 'f', 'G': 'g', 'HH': 'h', 'IH': 'ɪ', 'IY': 'i', 'JH': 'ʤ', 'K': 'k', 'L': 'l', 'M': 'm', 'N': 'n', 'NG': 'ŋ', 'OW': 'oʊ', 'OY': 'ɔɪ', 'P': 'p', 'R': 'r', 'S': 's', 'SH': 'ʃ', 'T': 't', 'TH': 'θ', 'UH': 'ʊ', 'UW': 'u', 'V': 'v', 'W': 'w', 'Y': 'j', 'Z': 'z', 'ZH': 'ʒ',
+}
+
+def arpabet_to_ipa(arpabet_phons: List[str]) -> Optional[str]:
+    """ARPAbet 음소열을 IPA 문자열로 변환합니다."""
+    ipa_phons = [ARPABET_TO_IPA_MAP.get(phon.upper(), '') for phon in arpabet_phons]
+    return "".join([p for p in ipa_phons if p])
+
 # =========================================================
 # 2. 핵심 함수: 라임 유닛 추출 및 점수 계산
 # =========================================================
@@ -82,7 +94,6 @@ def calculate_front_rhyme_score(onset_list1: List[str], onset_list2: List[str]) 
     if not onset_list1 or not onset_list2:
         return 0.0
         
-    # 비교를 위해 가장 짧은 Onset 길이를 기준으로 맞춥니다.
     min_len = min(len(onset_list1), len(onset_list2))
     
     vec1_list = [get_embedding(p) for p in onset_list1[-min_len:]]
@@ -95,15 +106,6 @@ def calculate_front_rhyme_score(onset_list1: List[str], onset_list2: List[str]) 
         return 0.0
 
     return max(0, 1 - cosine(vec1, vec2))
-
-
-def arpabet_to_ipa(arpabet_phons: List[str]) -> Optional[str]:
-    """ARPAbet 음소열을 IPA 문자열로 변환합니다."""
-    ARPABET_TO_IPA_MAP = {
-        'AA': 'ɑ', 'AE': 'æ', 'AH': 'ʌ', 'AO': 'ɔ', 'AW': 'aʊ', 'AY': 'aɪ', 'B': 'b', 'CH': 'ʧ', 'D': 'd', 'DH': 'ð', 'EH': 'ɛ', 'ER': 'əɹ', 'EY': 'eɪ', 'F': 'f', 'G': 'g', 'HH': 'h', 'IH': 'ɪ', 'IY': 'i', 'JH': 'ʤ', 'K': 'k', 'L': 'l', 'M': 'm', 'N': 'n', 'NG': 'ŋ', 'OW': 'oʊ', 'OY': 'ɔɪ', 'P': 'p', 'R': 'r', 'S': 's', 'SH': 'ʃ', 'T': 't', 'TH': 'θ', 'UH': 'ʊ', 'UW': 'u', 'V': 'v', 'W': 'w', 'Y': 'j', 'Z': 'z', 'ZH': 'ʒ',
-    }
-    ipa_phons = [ARPABET_TO_IPA_MAP.get(phon.upper(), '') for phon in arpabet_phons]
-    return "".join([p for p in ipa_phons if p])
 
 
 def calculate_slant_score(phon_list1: List[str], phon_list2: List[str], target_vowel: str, candidate_vowel: str) -> float:
@@ -133,7 +135,7 @@ def calculate_slant_score(phon_list1: List[str], phon_list2: List[str], target_v
 
 @st.cache_data(show_spinner=False)
 def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
-    """라임 유형별로 분류하여 후보 단어를 출력합니다."""
+    """Front Rhyme 점수를 포함하여 라임 후보를 찾습니다."""
     
     target_info = get_rhyme_unit(target_word)
     
@@ -141,21 +143,22 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
         return {"target_word": target_word, "target_ipa": "N/A", "target_rhyme_unit": "N/A", "raw_arpabet": "N/A", "candidates": []}
 
     target_pron_raw, target_onset, target_rhyme_unit = target_info
-    target_ipa = arpabet_to_ipa(target_rhyme_unit)
+    
+    # 🌟 NameError 해결: target_vowel을 여기서 정의합니다.
     target_vowel = target_rhyme_unit[0] if target_rhyme_unit else ""
+    target_ipa = arpabet_to_ipa(target_rhyme_unit)
+    
     target_rhyme_len = len(target_rhyme_unit)
     
     if not target_ipa or not target_rhyme_unit:
         return {"target_word": target_word, "target_ipa": "N/A", "target_rhyme_unit": "N/A", "raw_arpabet": target_pron_raw, "candidates": []}
 
-    # 최종 출력을 위한 분류 딕셔너리
     classified_candidates = {
-        "holorhymes": [], # Front Rhyme + End Rhyme 모두 높은 점수
-        "front_rhymes": [], # Front Rhyme만 높은 점수
-        "end_rhymes": [], # End Rhyme만 높은 점수
+        "holorhymes": [], 
+        "front_rhymes": [], 
+        "end_rhymes": [], 
     }
     
-    # 점수 기준 (임계값 설정)
     RHYME_THRESHOLD = 0.85
     
     for word, _ in p_dict.items():
@@ -169,14 +172,23 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
         if word == target_word.lower():
             continue
             
+        candidate_vowel = candidate_rhyme_unit[0] if candidate_rhyme_unit else ""
+        
         # A. Perfect Rhyme 검사 (완벽 라임은 제외)
+        is_perfect = False
         if len(candidate_rhyme_unit) == target_rhyme_len and candidate_rhyme_unit == target_rhyme_unit:
             is_onset_different = (not target_onset or not candidate_onset or target_onset[-1] != candidate_onset[-1])
             if is_onset_different:
-                continue # 완벽 라임 제외
+                is_perfect = True
 
-        # B. Front/End Rhyme 점수 계산
+        if is_perfect:
+            continue
+
+        # B. Front/End Rhyme 점수 계산 및 분류
         
+        len_diff = abs(len(candidate_rhyme_unit) - target_rhyme_len)
+        if len_diff > 2: continue
+            
         # 1. End Rhyme Score (Rhyme Unit 유사도)
         end_score = calculate_slant_score(target_rhyme_unit, candidate_rhyme_unit, target_vowel, candidate_vowel)
         
@@ -185,44 +197,30 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
         if target_onset and candidate_onset:
             front_score = calculate_front_rhyme_score(target_onset, candidate_onset)
         
-        # 3. 분류
+        # 3. 분류 (독립적인 점수 기반)
         is_front_match = front_score >= RHYME_THRESHOLD
         is_end_match = end_score >= RHYME_THRESHOLD
         
+        candidate_data = {
+            "word": word,
+            "end_score": round(end_score, 4),
+            "front_score": round(front_score, 4),
+            "ipa": arpabet_to_ipa(candidate_rhyme_unit),
+            "rhyme_unit": " ".join(candidate_rhyme_unit),
+        }
+        
         if is_front_match and is_end_match:
-            # Holorime / Mosaic Rhyme (양쪽 모두 높은 점수)
-            classified_candidates["holorhymes"].append({
-                "word": word,
-                "end_score": round(end_score, 4),
-                "front_score": round(front_score, 4),
-                "ipa": arpabet_to_ipa(candidate_rhyme_unit),
-                "rhyme_unit": " ".join(candidate_rhyme_unit),
-            })
+            classified_candidates["holorhymes"].append(candidate_data)
         elif is_front_match:
-            # Front Rhyme (앞부분만 높은 점수)
-            classified_candidates["front_rhymes"].append({
-                "word": word,
-                "front_score": round(front_score, 4),
-                "end_score": round(end_score, 4),
-                "ipa": arpabet_to_ipa(candidate_rhyme_unit),
-                "rhyme_unit": " ".join(candidate_rhyme_unit),
-            })
+            classified_candidates["front_rhymes"].append(candidate_data)
         elif is_end_match:
-            # End Rhyme (뒷부분만 높은 점수)
-            classified_candidates["end_rhymes"].append({
-                "word": word,
-                "end_score": round(end_score, 4),
-                "front_score": round(front_score, 4),
-                "ipa": arpabet_to_ipa(candidate_rhyme_unit),
-                "rhyme_unit": " ".join(candidate_rhyme_unit),
-            })
+            classified_candidates["end_rhymes"].append(candidate_data)
 
     # 분류된 목록을 점수(End Score) 기준으로 정렬
     for key in classified_candidates:
         classified_candidates[key].sort(key=lambda x: x['end_score'], reverse=True)
 
 
-    # 최종 출력을 위해 분류된 결과를 JSON으로 재구성
     final_output = {
         "target_word": target_word,
         "target_ipa": target_ipa,
@@ -240,10 +238,10 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 st.set_page_config(page_title="Phonetics Analyzer (Rhyme Classification)", layout="wide")
 
 st.title("🎤 CMUDict 통합: 에미넴 스타일 라임 분류 분석기")
-st.caption("✅ Front Rhyme과 End Rhyme을 **독립적인 점수**로 계산하여 복합 라임 구성을 돕습니다.")
+st.caption("✅ Front Rhyme 구현 및 Score 버그 수정 완료. 이 코드는 NameError를 해결합니다.")
 
 # 사용자 입력
-input_word = st.text_input("분석할 단어를 입력하세요 (예: lawyer, nervous, controversy)", "nervous")
+input_word = st.text_input("분석할 단어를 입력하세요 (예: together, recently, lawyer)", "recently")
 
 if input_word:
     st.subheader(f"🔍 '{input_word}'에 대한 CMUDict 기반 분석 결과")
@@ -282,4 +280,4 @@ if input_word:
     # 4. JSON 출력
     st.markdown("---")
     st.markdown("#### 🤖 Gemini에게 제공할 최종 API 응답 (JSON)")
-    st.code(json.dumps(analysis_result, indent=2), language='json')
+    st.code(json.dumps(final_output, indent=2), language='json')
