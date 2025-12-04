@@ -135,7 +135,7 @@ def calculate_slant_score(phon_list1: List[str], phon_list2: List[str], target_v
 
 @st.cache_data(show_spinner=False)
 def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
-    """Front Rhyme 점수를 포함하여 라임 후보를 찾습니다."""
+    """라임 유형별로 분류하여 후보 단어를 출력합니다."""
     
     target_info = get_rhyme_unit(target_word)
     
@@ -144,7 +144,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 
     target_pron_raw, target_onset, target_rhyme_unit = target_info
     
-    # 🌟 NameError 해결: target_vowel을 여기서 정의합니다.
+    # NameError 해결: target_vowel을 Rhyme Unit에서 추출
     target_vowel = target_rhyme_unit[0] if target_rhyme_unit else ""
     target_ipa = arpabet_to_ipa(target_rhyme_unit)
     
@@ -237,7 +237,7 @@ def get_rhyme_candidates_with_score(target_word: str, top_n=100) -> Dict:
 
 st.set_page_config(page_title="Phonetics Analyzer (Rhyme Classification)", layout="wide")
 
-st.title("🎤 CMUDict 통합: 에미넴 스타일 라임 분류 분석기")
+st.title("🎤 CMUDict 통합: 에미넴 스타일 라임 분류 분석기 (최종)")
 st.caption("✅ Front Rhyme 구현 및 Score 버그 수정 완료. 이 코드는 NameError를 해결합니다.")
 
 # 사용자 입력
@@ -280,4 +280,5 @@ if input_word:
     # 4. JSON 출력
     st.markdown("---")
     st.markdown("#### 🤖 Gemini에게 제공할 최종 API 응답 (JSON)")
-    st.code(json.dumps(final_output, indent=2), language='json')
+    # --- NameError 수정 완료: analysis_result 사용 ---
+    st.code(json.dumps(analysis_result, indent=2), language='json')
